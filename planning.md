@@ -127,42 +127,52 @@ For each tool, describe the specific failure mode you're handling and what the a
 
 ## Architecture
 
+The diagram uses Mermaid flowchart syntax — rendered on GitHub and in most markdown previewers.
+
+```mermaid
+flowchart TD
+    U([User: query + wardrobe_choice]) --> H[handle_query in app.py]
+    H --> A[run_agent]
+
+    A --> S1["_new_session(query, wardrobe)\nsession initialized"]
+    S1 --> S2["_parse_query(query)\nsession[parsed] = {description, size, max_price}"]
+    S2 --> S3["search_listings(description, size, max_price)\nsession[search_results] = [...]"]
+
+    S3 --> CHK{results empty?}
+    CHK -- yes --> ERR["session[error] = helpful retry message\nRETURN EARLY"]
+    CHK -- no --> S4["session[selected_item] = results[0]"]
+
+    S4 --> S5["suggest_outfit(selected_item, wardrobe)\nsession[outfit_suggestion] = '...'"]
+    S5 --> WC{wardrobe empty?}
+    WC -- yes --> GA["general styling advice prompt\n(no wardrobe pieces named)"]
+    WC -- no --> SP["specific outfit combinations\n(names wardrobe pieces)"]
+    GA --> S6
+    SP --> S6
+
+    S6["create_fit_card(outfit_suggestion, selected_item)\nsession[fit_card] = '...'"]
+    S6 --> OG{outfit string empty?}
+    OG -- yes --> ES["return error string\n(no LLM call)"]
+    OG -- no --> FC["LLM generates caption\n(temperature=1.0)"]
+    ES --> RET
+    FC --> RET
+
+    S6 --> RET[return session]
+    ERR --> OUT
+
+    RET --> OUT["handle_query maps session to 3 UI panels:\n• listing_text\n• outfit_suggestion\n• fit_card"]
 ```
-User input (query, wardrobe_choice)
-        │
-        ▼
-┌─────────────────────────────────────────────────────┐
-│                   run_agent()                       │
-│                                                     │
-│  1. _new_session(query, wardrobe)                   │
-│        │                                            │
-│  2. _parse_query(query)                             │
-│        │  → session["parsed"]                       │
-│        │    {description, size, max_price}          │
-│        │                                            │
-│  3. search_listings(description, size, max_price)   │
-│        │  → session["search_results"]               │
-│        │                                            │
-│        ├── empty? ──► session["error"] set          │
-│        │               RETURN EARLY ◄───────────────┤
-│        │                                            │
-│  4. select top result → session["selected_item"]    │
-│        │                                            │
-│  5. suggest_outfit(selected_item, wardrobe)         │
-│        │  → session["outfit_suggestion"]            │
-│        │  (empty wardrobe → general styling advice) │
-│        │                                            │
-│  6. create_fit_card(outfit_suggestion, selected_item│
-│        │  → session["fit_card"]                     │
-│        │  (empty outfit → error string returned)    │
-│        │                                            │
-│  7. return session                                  │
-└─────────────────────────────────────────────────────┘
-        │
-        ▼
-handle_query() in app.py
-  → maps session fields to 3 UI output panels
-```
+
+**Key data flows (what each arrow carries):**
+
+| From | To | Data |
+|------|----|------|
+| `_parse_query` | `search_listings` call | `description` (str), `size` (str\|None), `max_price` (float\|None) |
+| `search_listings` | session | `search_results` list of listing dicts |
+| select step | `suggest_outfit` | `selected_item` listing dict |
+| `_new_session` | `suggest_outfit` | `wardrobe` dict (passed through) |
+| `suggest_outfit` | `create_fit_card` | `outfit_suggestion` string |
+| `selected_item` | `create_fit_card` | listing dict (title, price, platform, style_tags) |
+| `create_fit_card` | caller | `fit_card` string |
 
 ---
 
